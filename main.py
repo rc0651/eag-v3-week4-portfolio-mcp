@@ -5,9 +5,10 @@ from fastmcp import FastMCP
 from kiteconnect import KiteConnect
 from prefab_ui.app import PrefabApp
 from prefab_ui.components import (
-    Column, Heading, Separator, Text,
-    Card, ForEach, Rx,
+    Column, Row, Heading, Separator, Text,
+    Card, ForEach, Rx, Button,
 )
+from prefab_ui.actions.mcp import CallTool
 
 load_dotenv()
 
@@ -40,11 +41,14 @@ def fetch_portfolio() -> str:
     raw = kite.holdings()
     holdings = []
     for h in raw:
-        pnl = round((h["last_price"] - h["average_price"]) * h["quantity"], 2)
+        mtf      = h.get("mtf") or {}
+        quantity = mtf.get("quantity") or h["quantity"]
+        avg      = mtf.get("average_price") or h["average_price"]
+        pnl      = round((h["last_price"] - avg) * quantity, 2)
         holdings.append({
             "symbol":     h["tradingsymbol"],
-            "quantity":   h["quantity"],
-            "avg_price":  round(h["average_price"], 2),
+            "quantity":   quantity,
+            "avg_price":  round(avg, 2),
             "last_price": round(h["last_price"], 2),
             "pnl":        pnl,
             "pnl_str":    _fmt_pnl(pnl),
@@ -83,6 +87,9 @@ def save_to_file() -> str:
 @mcp.tool(app=True)
 def show_dashboard() -> PrefabApp:
     """Show a portfolio dashboard: gainers first, then losers, with per-card P&L coloring."""
+    if not portfolio_state.get("holdings"):
+        fetch_portfolio()
+
     holdings      = portfolio_state.get("holdings", [])
     total_pnl_str = portfolio_state.get("total_pnl_str", "0.00")
 
@@ -111,7 +118,9 @@ def show_dashboard() -> PrefabApp:
     }
 
     with PrefabApp(title="My Zerodha Portfolio", state=state, css_class="p-6 space-y-4") as app:
-        Heading("My Zerodha Portfolio")
+        with Row(css_class="items-center justify-between"):
+            Heading("My Zerodha Portfolio")
+            Button("Fetch Portfolio", on_click=CallTool("fetch_portfolio"))
         Heading(f"Total P&L: ₹{Rx('total_pnl_str')}")
         Separator()
 
@@ -134,6 +143,14 @@ def show_dashboard() -> PrefabApp:
                     Text(f"₹{item.last_price}  ·  Avg ₹{item.avg_price}")
 
     return app
+
+
+@mcp.tool()
+def run_full_analysis() -> str:
+    """Run the complete portfolio pipeline: fetch → save to CSV → show dashboard."""
+    step1 = fetch_portfolio()
+    step2 = save_to_file()
+    return f"Analysis complete.\n1. {step1}\n2. {step2}\n3. Call show_dashboard to view the Prefab UI."
 
 
 if __name__ == "__main__":
